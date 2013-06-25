@@ -16,10 +16,9 @@
 
 # Significant portions derived from Image Factory - http://imgfac.org/
 
-import ozutil
 import boto.ec2
 import random
-import logging 
+import logging
 import process_utils
 import re
 import os.path
