@@ -19,69 +19,50 @@ from optparse import OptionParser
 import ozutil
 import re
 import shutil
-import sys
 import logging
 import os
-import os.path
 from tempfile import mkdtemp
 from string import Template
 
-def create_ext2_image(image_file, image_size=(1024*1024*200)):
+def _create_ext2_image(image_file, image_size=(1024*1024*200)):
+    """
+    Create a 200M (default) disk image named image_file.
+    """
     raw_fs_image=open(image_file,"w")
     raw_fs_image.truncate(image_size)
     raw_fs_image.close()
-
     g = guestfs.GuestFS()
-
     g.add_drive(image_file)
-
     g.launch()
-
     g.part_disk("/dev/sda","msdos")
     g.part_set_mbr_id("/dev/sda",1,0x83)
     g.mkfs("ext2", "/dev/sda1")
     g.part_set_bootable("/dev/sda", 1, 1)
     g.sync()
-    
-    #g.shutdown()
+    #g.shutdown() needed?
 
-
-def generate_boot_content(url, dest_dir, distro, create_volume):
+def _generate_boot_content(url, dest_dir):
     """
     Insert kernel, ramdisk and syslinux.cfg file in dest_dir
     source from url
     """
-    # TODO: Add support for something other than rhel5
-
-    if distro == "rpm":
-        kernel_url = url + "images/pxeboot/vmlinuz"
-        initrd_url = url + "images/pxeboot/initrd.img"
-        if create_volume:
-            # NOTE: RHEL5 and other older Anaconda versions do not support specifying the CDROM device - use with caution
-            cmdline = "ks=http://169.254.169.254/latest/user-data repo=cdrom:/dev/vdb"
-        else:
-            cmdline = "ks=http://169.254.169.254/latest/user-data"
-    elif distro == "ubuntu":
-        kernel_url = url + "main/installer-amd64/current/images/netboot/ubuntu-installer/amd64/linux"
-        initrd_url = url + "main/installer-amd64/current/images/netboot/ubuntu-installer/amd64/initrd.gz"
-        cmdline = "append preseed/url=http://169.254.169.254/latest/user-data debian-installer/locale=en_US console-setup/layoutcode=us netcfg/choose_interface=auto keyboard-configuration/layoutcode=us priority=critical --"
-
+    kernel_url = url + "images/pxeboot/vmlinuz"
+    initrd_url = url + "images/pxeboot/initrd.img"
+    cmdline = "ks=http://169.254.169.254/latest/user-data"
     kernel_dest = os.path.join(dest_dir,"vmlinuz")
     http_download_file(kernel_url, kernel_dest)
-
     initrd_dest = os.path.join(dest_dir,"initrd.img")
     http_download_file(initrd_url, initrd_dest)
 
-    pvgrub_conf="""# This file is for use with pv-grub; legacy grub is not installed in this image
+    pvgrub_conf="""# This file is for use with pv-grub;
+# legacy grub is not installed in this image
 default=0
 timeout=0
-#hiddenmenu
 title Anaconda install inside of EC2
         root (hd0,0)
         kernel /boot/grub/vmlinuz %s
         initrd /boot/grub/initrd.img
 """ % cmdline
-
     f = open(os.path.join(dest_dir, "menu.lst"),"w")
     f.write(pvgrub_conf)
     f.close()
@@ -93,8 +74,10 @@ def http_download_file(url, filename):
     finally:
         os.close(fd)
 
-
-def copy_content_to_image(contentdir, target_image):
+def _copy_content_to_image(contentdir, target_image):
+    """
+    Copy all files in contentdir to the target image using guestfs.
+    """
     g = guestfs.GuestFS()
     g.add_drive(target_image)
     g.launch()
@@ -103,55 +86,8 @@ def copy_content_to_image(contentdir, target_image):
     for filename in os.listdir(contentdir):
         g.upload(os.path.join(contentdir,filename),"/boot/grub/" + filename)
     g.sync()
-    #g.shutdown()
 
-
-def install_extract_bits(install_file, distro):
-    if distro == "rpm":
-        return ks_extract_bits(install_file)
-    elif distro == "ubuntu":
-        return preseed_extract_bits(install_file)
-    else:
-        return (None, None, None, None)
-
-def preseed_extract_bits(preseedfile):
-
-    install_url = None
-    console_password = None
-    console_command = None
-    poweroff = False
-
-    for line in preseedfile.splitlines():
-
-        # Network console lines look like this:
-        # d-i network-console/password password r00tme
-        m = re.match("d-i\s+network-console/password\s+password\s+(\S+)", line)
-        if m and len(m.groups()) == 1:
-            console_password = m.group(1)
-            console_command = "ssh installer@%s\nNote that you MUST connect to this session for the install to continue\nPlease do so now\n"
-            continue
-
-        # Preseeds do not need to contain any explicit pointers to network install sources
-        # Users can specify the install-url on the cmd line or provide a hint in a
-        # comment line that looks like this:
-        # "#ubuntu_baseurl=http://us.archive.ubuntu.com/ubuntu/dists/precise/"
-        m = re.match("#ubuntu_baseurl=(\S+)", line)
-        if m and len(m.groups()) == 1:
-            install_url = m.group(1)
-
-        # A preseed poweroff directive looks like this:
-        # d-i debian-installer/exit/poweroff boolean true
-        if re.match("d-i\s+debian-installer/exit/poweroff\s+boolean\s+true", line):
-            poweroff=True
-            continue
-
-    return (install_url, console_password, console_command, poweroff)
-
-
-def ks_extract_bits(ksfile):
-    # I briefly looked at pykickstart but it more or less requires you know the version of the
-    # format you wish to use 
-    # The approach below actually works as far back as RHEL5 and as recently as F18
+def _ks_extract_bits(ksfile):
 
     install_url = None
     console_password = None
@@ -185,7 +121,8 @@ def ks_extract_bits(ksfile):
             console_command = "ssh root@%s"
             continue
 
-        # We require a poweroff after install to detect completion - look for the line
+        # We require a poweroff after install to detect completion -
+        # look for the line
         if re.match("poweroff", line):
             poweroff=True
             continue
@@ -197,48 +134,38 @@ def do_pw_sub(ks_file, admin_password):
     f = open(ks_file, "r")
     working_ks = ""
     for line in f:
-        working_ks += Template(line).safe_substitute({ 'adminpw': admin_password })
+        working_ks += Template(line).safe_substitute(
+            { 'adminpw': admin_password })
     f.close()
     return working_ks
 
-def detect_distro(install_script):
-
-    for line in install_script.splitlines():
-        if re.match("d-i\s+debian-installer", line):
-            return "ubuntu"
-        elif re.match("%packages", line):
-            return "rpm"
-
-    return None
-
-
 def generate_install_image(ks_file, image_filename):
-    # No need for PW sub here - the relevant bits can be read without sub
+    """
+    Generate a .raw file, this is the entry point function from main.
+    The steps are:
+        create an ext2 image
+        generate some required configuration in the image (like menu.lst)
+        copy in the anaconda bits from the install tree
+    """
     working_kickstart = open(ks_file).read()
-    distro = detect_distro(working_kickstart)
-    if not detect_distro:
-        raise Exception("Could not determine distro type from install script '%s'" % (ks_file))
-    (install_tree_url, console_password, console_command, poweroff) = install_extract_bits(working_kickstart, distro)
-
+    (install_tree_url, console_password, console_command, poweroff) = \
+        _ks_extract_bits(working_kickstart, distro)
     if not poweroff:
-        if distro == "rpm":
-            raise Exception("ERROR: supplied kickstart file must contain a 'poweroff' line")
-        elif distro == "ubuntu":
-            raise Exception("ERROR: supplied preseed must contain a 'd-i debian-installer/exit/poweroff boolean true' line")
-
+        raise Exception(
+            "ERROR: supplied kickstart file must contain a 'poweroff' line")
     if not install_tree_url:
         raise Exception("ERROR: no install tree URL specified and could not extract one from the kickstart/install-script")
 
-    create_ext2_image(image_filename, image_size=(1024*1024*200))
+    _create_ext2_image(image_filename, image_size=(1024*1024*200))
     tmp_content_dir = mkdtemp()
     try:
-        generate_boot_content(install_tree_url, tmp_content_dir, distro, False)
-        copy_content_to_image(tmp_content_dir, image_filename)
+        _generate_boot_content(install_tree_url, tmp_content_dir)
+        _copy_content_to_image(tmp_content_dir, image_filename)
     finally:
         shutil.rmtree(tmp_content_dir)
 
 def get_opts():
-    usage='%prog ksfile image-name'
+    usage='%prog [options] ksfile image-name'
     parser = OptionParser(usage=usage)
     opts, args = parser.parse_args()
     if len(args) != 2:
