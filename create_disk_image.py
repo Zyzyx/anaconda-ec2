@@ -17,10 +17,9 @@
 
 import guestfs
 from optparse import OptionParser
-import ozutil
-import shutil
-import logging
 import os
+import pycurl
+import shutil
 from tempfile import mkdtemp
 
 def _create_ext2_image(image_file, image_size=(1024*1024*200)):
@@ -69,9 +68,47 @@ title Anaconda install inside of EC2
 def http_download_file(url, filename):
     fd = os.open(filename,os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
     try:
-        ozutil.http_download_file(url, fd, False, logging.getLogger())
+        _http_download_file(url, fd, True)
     finally:
         os.close(fd)
+
+def _http_download_file(url, fd, show_progress):
+    """
+    Function to download a file from url to file descriptor fd.
+    """
+    class Progress(object):
+        def __init__(self):
+            self.last_mb = -1
+
+        def _progress(self, down_total, down_current, up_total, up_current):
+            """
+            Function that is called back from the pycurl perform() method to
+            update the progress information.
+            """
+            if down_total == 0:
+                return
+            current_mb = int(down_current) / 10485760
+            if current_mb > self.last_mb or down_current == down_total:
+                self.last_mb = current_mb
+
+    def _data(buf):
+        """
+        Function that is called back from the pycurl perform() method to
+        actually write data to disk.
+        """
+        os.write(fd, buf)
+
+    progress = Progress()
+    c = pycurl.Curl()
+    c.setopt(c.URL, url)
+    c.setopt(c.CONNECTTIMEOUT, 5)
+    c.setopt(c.WRITEFUNCTION, _data)
+    c.setopt(c.FOLLOWLOCATION, 1)
+    if show_progress:
+        c.setopt(c.NOPROGRESS, 0)
+        c.setopt(c.PROGRESSFUNCTION, progress._progress)
+    c.perform()
+    c.close()
 
 def _copy_content_to_image(contentdir, target_image):
     """
