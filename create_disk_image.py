@@ -1,6 +1,7 @@
 #!/usr/bin/python
 #   Copyright (C) 2013 Red Hat, Inc.
 #   Copyright (C) 2013 Ian McLeod <imcleod@redhat.com>
+#                      Jay Greguske <jgregusk@redhat.com>
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -17,12 +18,10 @@
 import guestfs
 from optparse import OptionParser
 import ozutil
-import re
 import shutil
 import logging
 import os
 from tempfile import mkdtemp
-from string import Template
 
 def _create_ext2_image(image_file, image_size=(1024*1024*200)):
     """
@@ -87,59 +86,7 @@ def _copy_content_to_image(contentdir, target_image):
         g.upload(os.path.join(contentdir,filename),"/boot/grub/" + filename)
     g.sync()
 
-def _ks_extract_bits(ksfile):
-
-    install_url = None
-    console_password = None
-    console_command = None
-    poweroff = False
-    distro = None
-
-    for line in ksfile.splitlines():
-        # Install URL lines look like this
-        # url --url=http://download.devel.redhat.com/released/RHEL-5-Server/U9/x86_64/os/
-        m = re.match("url.*--url=(\S+)", line)
-        if m and len(m.groups()) == 1:
-            install_url = m.group(1)
-            continue
-
-        # VNC console lines look like this
-        # Inisist on a password being set
-        # vnc --password=vncpasswd    
-        m = re.match("vnc.*--password=(\S+)", line)
-        if m and len(m.groups()) == 1:
-            console_password = m.group(1)
-            console_command = "vncviewer %s:1"
-            continue
-
-        # SSH console lines look like this
-        # Inisist on a password being set
-        # ssh --password=sshpasswd    
-        m = re.match("ssh.*--password=(\S+)", line)
-        if m and len(m.groups()) == 1:
-            console_password = m.group(1)
-            console_command = "ssh root@%s"
-            continue
-
-        # We require a poweroff after install to detect completion -
-        # look for the line
-        if re.match("poweroff", line):
-            poweroff=True
-            continue
-
-    return (install_url, console_password, console_command, poweroff)
-
-
-def do_pw_sub(ks_file, admin_password):
-    f = open(ks_file, "r")
-    working_ks = ""
-    for line in f:
-        working_ks += Template(line).safe_substitute(
-            { 'adminpw': admin_password })
-    f.close()
-    return working_ks
-
-def generate_install_image(ks_file, image_filename):
+def generate_install_image(install_tree_url, image_filename):
     """
     Generate a .raw file, this is the entry point function from main.
     The steps are:
@@ -147,15 +94,6 @@ def generate_install_image(ks_file, image_filename):
         generate some required configuration in the image (like menu.lst)
         copy in the anaconda bits from the install tree
     """
-    working_kickstart = open(ks_file).read()
-    (install_tree_url, console_password, console_command, poweroff) = \
-        _ks_extract_bits(working_kickstart, distro)
-    if not poweroff:
-        raise Exception(
-            "ERROR: supplied kickstart file must contain a 'poweroff' line")
-    if not install_tree_url:
-        raise Exception("ERROR: no install tree URL specified and could not extract one from the kickstart/install-script")
-
     _create_ext2_image(image_filename, image_size=(1024*1024*200))
     tmp_content_dir = mkdtemp()
     try:
@@ -169,13 +107,11 @@ def get_opts():
     parser = OptionParser(usage=usage)
     opts, args = parser.parse_args()
     if len(args) != 2:
-        parser.error('You must provide a kickstart file and image name')
+        parser.error('You must provide a kickstart file and an install tree')
     if not args[1].endswith('.raw'):
         args[1] += '.raw'
-    if not os.path.exists(args[0]):
-        parser.error('kickstart %s does not exist!' % args[0])
     return args[0], args[1]
 
 if __name__ == "__main__":
-    ksfile, imagename = get_opts()
-    generate_install_image(ksfile, imagename)
+    treeurl, imagename = get_opts()
+    generate_install_image(treeurl, imagename)
