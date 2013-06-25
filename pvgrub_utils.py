@@ -15,6 +15,7 @@
 #   limitations under the License.
 
 import guestfs
+from optparse import OptionParser
 import ozutil
 import re
 import shutil
@@ -236,14 +237,18 @@ def generate_install_image(ks_file, image_filename):
     finally:
         shutil.rmtree(tmp_content_dir)
 
-if __name__ == "__main__":
-    # stuff only to run when not called via 'import' here
-    if len(sys.argv) != 3:
-        print
-        print "Create a pvgrub bootable image for EC2"
-        print 
-        print "usage: %s <ks_file> <image_file>" % sys.argv[0]
-        print
-        sys.exit(1)
+def get_opts():
+    usage='%prog ksfile image-name'
+    parser = OptionParser(usage=usage)
+    opts, args = parser.parse_args()
+    if len(args) != 2:
+        parser.error('You must provide a kickstart file and image name')
+    if not args[1].endswith('.raw'):
+        args[1] += '.raw'
+    if not os.path.exists(args[0]):
+        parser.error('kickstart %s does not exist!' % args[0])
+    return args[0], args[1]
 
-    generate_install_image(sys.argv[1], sys.argv[2])
+if __name__ == "__main__":
+    ksfile, imagename = get_opts()
+    generate_install_image(ksfile, imagename)
