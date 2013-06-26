@@ -44,13 +44,12 @@ def _generate_boot_content(url, dest_dir):
     Insert kernel, ramdisk and syslinux.cfg file in dest_dir
     source from url
     """
-    kernel_url = url + "images/pxeboot/vmlinuz"
-    initrd_url = url + "images/pxeboot/initrd.img"
     cmdline = "ks=http://169.254.169.254/latest/user-data"
-    kernel_dest = os.path.join(dest_dir,"vmlinuz")
-    http_download_file(kernel_url, kernel_dest)
-    initrd_dest = os.path.join(dest_dir,"initrd.img")
-    http_download_file(initrd_url, initrd_dest)
+    for content in ('vmlinuz', 'initrd.img'):
+        destination = os.path.join(dest_dir, content)
+        source = url + "images/pxeboot/%s" % content
+        print 'Downloading %s' % content
+        http_download_file(source, destination)
 
     pvgrub_conf="""# This file is for use with pv-grub;
 # legacy grub is not installed in this image
@@ -61,7 +60,7 @@ title Anaconda install inside of EC2
         kernel /boot/grub/vmlinuz %s
         initrd /boot/grub/initrd.img
 """ % cmdline
-    f = open(os.path.join(dest_dir, "menu.lst"),"w")
+    f = open(os.path.join(dest_dir, "menu.lst"), "w")
     f.write(pvgrub_conf)
     f.close()
 
@@ -78,18 +77,7 @@ def _http_download_file(url, fd, show_progress):
     """
     class Progress(object):
         def __init__(self):
-            self.last_mb = -1
-
-        def _progress(self, down_total, down_current, up_total, up_current):
-            """
-            Function that is called back from the pycurl perform() method to
-            update the progress information.
-            """
-            if down_total == 0:
-                return
-            current_mb = int(down_current) / 10485760
-            if current_mb > self.last_mb or down_current == down_total:
-                self.last_mb = current_mb
+            self.last_k = -1
 
     def _data(buf):
         """
@@ -104,9 +92,6 @@ def _http_download_file(url, fd, show_progress):
     c.setopt(c.CONNECTTIMEOUT, 5)
     c.setopt(c.WRITEFUNCTION, _data)
     c.setopt(c.FOLLOWLOCATION, 1)
-    if show_progress:
-        c.setopt(c.NOPROGRESS, 0)
-        c.setopt(c.PROGRESSFUNCTION, progress._progress)
     c.perform()
     c.close()
 
@@ -140,11 +125,11 @@ def generate_install_image(install_tree_url, image_filename):
         shutil.rmtree(tmp_content_dir)
 
 def get_opts():
-    usage='%prog [options] ksfile image-name'
+    usage='%prog [options] install-tree image-name'
     parser = OptionParser(usage=usage)
     opts, args = parser.parse_args()
     if len(args) != 2:
-        parser.error('You must provide a kickstart file and an install tree')
+        parser.error('You must provide an install tree and image name')
     if not args[1].endswith('.raw'):
         args[1] += '.raw'
     return args[0], args[1]
