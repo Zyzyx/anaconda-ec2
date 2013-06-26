@@ -1,41 +1,35 @@
 Run the Anaconda installer in EC2
 =================================
 
-This is an attempt to collect some code that launches Anaconda based installs inside of EBS backed
-images in EC2.  This takes advantage of the ability to use pvgrub to launch EBS backed images using
-kernels and ramdisks contained in the EBS volume.
-
-This project is related to my work to run installers natively inside of the OpenStack Nova component:
+This is a fork of Ian McLeod's work that attempts to collect some code that
+launches Anaconda based installs inside of EBS backed images in EC2. You can see
+some of his related work on OpenStack:
 
 https://github.com/redhat-openstack/image-building-poc/
 
-This requires the boto EC2 bindings and libguestfs.  So, to start off with on Fedora or RHEL do this:
+I have added a few features to make this more useful to Anaconda testing such
+as changing the kernel parameters and including an updates.img. I have also
+dropped Ubuntu-related code since I have no intention of maintaining it for now.
+
+Like Ian's repo this requires the boto EC2 bindings and libguestfs.
 
 $ yum install python-libguestfs python-boto
-
-It may require other things I have missed.  If so lemmie know.  
-
--Ian - imcleod@redhat.com
-
 
 ## Example
 
 ### Create a local disk image that will boot Anaconda via pvgrub
 
-    $ ./pvgrub_image_from_ks.py ./examples/fedora-18-jeos.ks ./fedora_18.raw
+    $ ./create_disk_image.py <install-tree-url> fedora_18.raw
 
-For this step, the kickstart must contain a "url" line that points to a valid install
-tree for the OS in question.  This URL will be used to extract the kernel and ramdisk
-needed to bootstrap Anaconda.  Adding support for DVD ISO install sources is a potential
-next step.
-
-The extracted kernel and ramdisk are put into a disk image along with a valid pvgrub
+The install tree URL will be used to extract the kernel and ramdisk
+needed to bootstrap Anaconda. An updates.img can be used too.
+These pieces are put into a disk image along with a valid pvgrub
 menu.lst file.  This is all that is needed to launch Anaconda inside of an EC insance.
 
 
 ### Turn this image into an AMI
 
-    $ ./ami_from_image_file.py <ec2_region> <ec2_key> <ec2_secret> ./fedora_18.raw
+    $ ./ami_from_disk_image.py <ec2_key> <ec2_secret> ./fedora_18.raw
 
 If successful this will return an AMI on a line that looks like this:
 
