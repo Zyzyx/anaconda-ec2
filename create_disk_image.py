@@ -39,12 +39,11 @@ def _create_ext2_image(image_file, image_size=(1024*1024*200)):
     g.sync()
     #g.shutdown() needed?
 
-def _generate_boot_content(url, dest_dir):
+def _generate_boot_content(url, dest_dir, cmdline):
     """
     Insert kernel, ramdisk and syslinux.cfg file in dest_dir
     source from url
     """
-    cmdline = "ks=http://169.254.169.254/latest/user-data"
     for content in ('vmlinuz', 'initrd.img'):
         destination = os.path.join(dest_dir, content)
         source = url + "images/pxeboot/%s" % content
@@ -108,7 +107,7 @@ def _copy_content_to_image(contentdir, target_image):
         g.upload(os.path.join(contentdir,filename),"/boot/grub/" + filename)
     g.sync()
 
-def generate_install_image(install_tree_url, image_filename):
+def generate_install_image(install_tree_url, image_filename, parameters):
     """
     Generate a .raw file, this is the entry point function from main.
     The steps are:
@@ -119,7 +118,7 @@ def generate_install_image(install_tree_url, image_filename):
     _create_ext2_image(image_filename, image_size=(1024*1024*200))
     tmp_content_dir = mkdtemp()
     try:
-        _generate_boot_content(install_tree_url, tmp_content_dir)
+        _generate_boot_content(install_tree_url, tmp_content_dir, parameters)
         _copy_content_to_image(tmp_content_dir, image_filename)
     finally:
         shutil.rmtree(tmp_content_dir)
@@ -127,13 +126,16 @@ def generate_install_image(install_tree_url, image_filename):
 def get_opts():
     usage='%prog [options] install-tree image-name'
     parser = OptionParser(usage=usage)
+    parser.add_option('-p', '--parameters', default='',
+        help='Set the kernel parameters to be passed to Anaconda')
     opts, args = parser.parse_args()
+    opts.parameters += ' ks=http://169.254.169.254/latest/user-data'
     if len(args) != 2:
         parser.error('You must provide an install tree and image name')
     if not args[1].endswith('.raw'):
         args[1] += '.raw'
-    return args[0], args[1]
+    return args[0], args[1], opts.parameters
 
 if __name__ == "__main__":
-    treeurl, imagename = get_opts()
-    generate_install_image(treeurl, imagename)
+    treeurl, imagename, params = get_opts()
+    generate_install_image(treeurl, imagename, params)
