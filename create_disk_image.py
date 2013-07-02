@@ -143,8 +143,8 @@ def get_opts():
         opts.parameters += ' updates=%s' % opts.updates
     if len(args) != 1:
         parser.error('You must provide an image name')
-    if not args[1].endswith('.raw'):
-        args[1] += '.raw'
+    if not args[0].endswith('.raw'):
+        args[0] += '.raw'
     install_tree = None
     if opts.nightly:
         install_tree = 'http://dl.fedoraproject.org/pub/fedora/linux/development/%s/x86_64/os/' % branch_release
