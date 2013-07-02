@@ -17,7 +17,6 @@
 import logging
 import sys
 from aws_utils import EBSHelper, AMIHelper
-from pvgrub_utils import do_pw_sub
 
 if len(sys.argv) != 7:
     print
@@ -38,7 +37,7 @@ logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 
 ami_helper = AMIHelper(region, key, secret)
 
-user_data = do_pw_sub(install_script, root_pw)
+user_data = open(install_script).read()
 install_ami = ami_helper.launch_wait_snapshot(install_ami, user_data, 10)
 
 print "Got AMI: %s" % install_ami

@@ -13,12 +13,10 @@ import subprocess
 def subprocess_check_output(*popenargs, **kwargs):
     if 'stdout' in kwargs:
         raise ValueError('stdout argument not allowed, it will be overridden.')
-
-    process = subprocess.Popen(stdout=subprocess.PIPE, stderr=subprocess.STDOUT, *popenargs, **kwargs)
-
+    process = subprocess.Popen(stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, *popenargs, **kwargs)
     stdout, stderr = process.communicate()
     retcode = process.poll()
-
     if retcode:
         cmd = ' '.join(*popenargs)
         raise Exception("'%s' failed(%d): %s" % (cmd, retcode, stderr))
@@ -27,16 +25,13 @@ def subprocess_check_output(*popenargs, **kwargs):
 def subprocess_check_output_pty(*popenargs, **kwargs):
     if 'stdout' in kwargs:
         raise ValueError('stdout argument not allowed, it will be overridden.')
-
     (master, slave) = os.openpty()
-    process = subprocess.Popen(stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, *popenargs, **kwargs)
-
+    process = subprocess.Popen(stdin=slave, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, *popenargs, **kwargs)
     stdout, stderr = process.communicate()
     retcode = process.poll()
-
     os.close(slave)
     os.close(master)
-
     if retcode:
         cmd = ' '.join(*popenargs)
         raise Exception("'%s' failed(%d): %s" % (cmd, retcode, stderr))
@@ -58,7 +53,6 @@ def ssh_execute_command(guestaddr, sshprivkey, command, timeout=10, user='root',
     # configuration files
     #
     # -t -t ensures we have a pseudo tty for sudo
-
     cmd = ["ssh", "-i", sshprivkey,
             "-F", "/dev/null",
             "-o", "ServerAliveInterval=30",
@@ -67,12 +61,9 @@ def ssh_execute_command(guestaddr, sshprivkey, command, timeout=10, user='root',
             "-o", "UserKnownHostsFile=/dev/null",
             "-t", "-t",
             "-o", "PasswordAuthentication=no"]
-
     if prefix:
         command = prefix + " " + command
-
     cmd.extend(["%s@%s" % (user, guestaddr), command])
-
     if(prefix == 'sudo'):
         return subprocess_check_output_pty(cmd)
     else:
@@ -84,13 +75,16 @@ def enable_root(guestaddr, sshprivkey, user, prefix):
                 'cp /home/%s/.ssh/authorized_keys /root/.ssh' % user,
                 'chmod 600 /root/.ssh/authorized_keys'):
         try:
-            ssh_execute_command(guestaddr, sshprivkey, cmd, user=user, prefix=prefix)
+            ssh_execute_command(guestaddr, sshprivkey, cmd, user=user,
+                prefix=prefix)
         except Exception as e:
             pass
-
     try:
-        stdout, stderr, retcode = ssh_execute_command(guestaddr, sshprivkey, '/bin/id')
+        stdout, stderr, retcode = ssh_execute_command(
+            guestaddr, sshprivkey, '/bin/id')
         if not re.search('uid=0', stdout):
-            raise Exception('Running /bin/id on %s as root: %s' % (guestaddr, stdout))
+            raise Exception(
+                'Running /bin/id on %s as root: %s' % (guestaddr, stdout))
     except Exception as e:
-        raise Exception('Transfer of authorized_keys to root from %s must have failed - Aborting - %s' % (user, e))
+        raise Exception(
+            'Transfer of authorized_keys to root from %s failed - %s' % (user, e))

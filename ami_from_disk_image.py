@@ -26,7 +26,7 @@ Create an AMI on EC2 from a bootable disk image."""
     parser = OptionParser(usage=usage)
     parser.add_option('-r', '--region', default='us-east-1',
         help='set an EC2 region (us-east-1)')
-    opts.args = parser.parse_args()
+    opts, args = parser.parse_args()
     if len(args) != 3:
         parser.error('You must provide an EC2 Access Key, Secret, and image')
     if not os.path.exists(args[2]):
