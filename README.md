@@ -41,11 +41,10 @@ This AMI launches Anaconda and looks for a kickstart file at the EC2 user data
 URL.
 
 NOTE: This AMI can now be used for repeated runs of the next step, provided the OS version and architecture are the same. In the examples so far, x86_64 is
-assumed by the tools. You could specify an i686 install tree though, adn if you
+assumed by the tools. You could specify an i686 install tree though, and if you
 did, you would need to make sure your kickstarts were for i686 too.
 
-### Launch this AMI, wait for the install to complete then capture the results
-as a new AMI
+### Launch this AMI, wait for the install to complete then capture the results as a new AMI
 
 The next script will launch this AMI, pass the kickstart via user data and then
 wait for the install to complete and the instance to shut down.  Once this is
