@@ -3,13 +3,13 @@ url --url=http://mirror.stanford.edu/yum/pub/centos/6.4/os/x86_64/
 # Needed for cloud-init
 repo --name="EPEL-6" --baseurl="http://mirrors.kernel.org/fedora-epel/6/x86_64/"
 graphical
-vnc --password=${adminpw}
+vnc --password=centoscloud
 key --skip
 keyboard us
 lang en_US.UTF-8
 skipx
 network --device eth0 --bootproto dhcp
-rootpw ${adminpw}
+rootpw centoscloud
 firewall --disabled
 authconfig --enableshadow --enablemd5
 selinux --enforcing
