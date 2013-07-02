@@ -17,27 +17,30 @@
 
 from optparse import OptionParser
 import os.path
+import logging
 from aws_utils import EBSHelper, AMIHelper
 
 def get_opts():
-    usage = """%prog [options] ec2_key ec2_secret image_file
+    usage = """%prog [options] image_file
 
 Create an AMI on EC2 from a bootable disk image."""
     parser = OptionParser(usage=usage)
     parser.add_option('-r', '--region', default='us-east-1',
         help='set an EC2 region (us-east-1)')
     opts, args = parser.parse_args()
-    if len(args) != 3:
-        parser.error('You must provide an EC2 Access Key, Secret, and image')
-    if not os.path.exists(args[2]):
-        parser.error('Could not find %s' % args[2])
-    return opts.region, args[0], args[1], args[2]
+    if len(args) != 1:
+        parser.error('You must provide a disk image file')
+    if not os.path.exists(args[0]):
+        parser.error('Could not find %s' % args[0])
+    return opts.region, args[0]
+
+logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 
 if __name__ == '__main__':
-    region, key, secret, image_file = get_opts()
-    ebs_helper = EBSHelper(region, key, secret)
+    region, image_file = get_opts()
+    ebs_helper = EBSHelper(region)
     snapshot = ebs_helper.safe_upload_and_shutdown(image_file)
-    ami_helper = AMIHelper(region, key, secret)
+    ami_helper = AMIHelper(region)
     ami = ami_helper.register_ebs_ami(snapshot)
 
 print "Got AMI: %s" % ami

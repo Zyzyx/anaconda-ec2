@@ -21,7 +21,7 @@ from aws_utils import EBSHelper, AMIHelper
 
 def get_opts():
     usage="""
-%prog <ec2_key> <ec2_secret> <install_ami> <install_script>
+%prog <install_ami> <kickstart>
 
 Create an AMI on EC2 by running a native installer contained in a
 pre-existing AMI."""
@@ -29,15 +29,17 @@ pre-existing AMI."""
     parser.add_option('-r', '--region', default='us-east-1',
         help='Set the EC2 region we are working in')
     options, args = parser.parse_args()
-    if not os.path.exists(args[3]):
-        parser.error('could not read %s!' % args[3])
-    return options, args[0], args[1], args[2], args[3]
+    if len(args) != 2:
+        parser.error('You must provide an AMI and a kickstart file')
+    if not os.path.exists(args[1]):
+        parser.error('could not read %s!' % args[1])
+    return options, args[0], args[1]
 
 logging.basicConfig(level=logging.DEBUG, format='%(message)s')
 
 if __name__ == '__main__':
-    opts, key, secret, install_ami, install_script = get_opts()
-    ami_helper = AMIHelper(opts.region, key, secret)
-    user_data = open(install_script).read()
+    opts, install_ami, kickstart = get_opts()
+    ami_helper = AMIHelper(opts.region)
+    user_data = open(kickstart).read()
     install_ami = ami_helper.launch_wait_snapshot(install_ami, user_data, 10)
     print "Got AMI: %s" % install_ami

@@ -98,15 +98,13 @@ def wait_for_ec2_instance_state(instance, log, final_state='running', timeout=30
 
 class AMIHelper(object):
 
-    def __init__(self, ec2_region, access_key, secret_key):
+    def __init__(self, ec2_region):
         super(AMIHelper, self).__init__()
         self.log = logging.getLogger('%s.%s' %
             (__name__, self.__class__.__name__))
         try:
-            self.region = boto.ec2.get_region(ec2_region,
-                aws_access_key_id=access_key, aws_secret_access_key=secret_key)
-            self.conn = self.region.connect(
-                aws_access_key_id=access_key, aws_secret_access_key=secret_key)
+            self.region = boto.ec2.get_region(ec2_region)
+            self.conn = self.region.connect()
         except Exception as e:
             self.log.error("Exception while attempting to connect to EC2")
             raise
@@ -248,15 +246,13 @@ class AMIHelper(object):
 
 class EBSHelper(object):
 
-    def __init__(self, ec2_region, access_key, secret_key, utility_ami = None, command_prefix = None, user = 'root'):
+    def __init__(self, ec2_region, utility_ami = None, command_prefix = None, user = 'root'):
         super(EBSHelper, self).__init__()
         self.log = logging.getLogger(
             '%s.%s' % (__name__, self.__class__.__name__))
         try:
-            self.region = boto.ec2.get_region(ec2_region,
-                aws_access_key_id=access_key, aws_secret_access_key=secret_key)
-            self.conn = self.region.connect(
-                aws_access_key_id=access_key, aws_secret_access_key=secret_key)
+            self.region = boto.ec2.get_region(ec2_region)
+            self.conn = self.region.connect()
         except Exception as e:
             self.log.error("Exception while connecting to EC2")
             raise
