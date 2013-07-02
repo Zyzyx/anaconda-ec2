@@ -39,7 +39,7 @@ def _create_ext2_image(image_file, image_size=(1024*1024*200)):
     g.sync()
     #g.shutdown() needed?
 
-def _generate_boot_content(url, dest_dir, cmdline, updates):
+def _generate_boot_content(url, dest_dir, cmdline):
     """
     Insert kernel, ramdisk and syslinux.cfg file in dest_dir
     source from url
@@ -49,10 +49,6 @@ def _generate_boot_content(url, dest_dir, cmdline, updates):
         source = url + "images/pxeboot/%s" % content
         print 'Downloading %s' % content
         http_download_file(source, destination)
-    if updates:
-        destination = os.path.join(dest_dir, 'updates.img')
-        print 'Downloading updates.img'
-        http_download_file(updates, destination)
 
     pvgrub_conf="""# This file is for use with pv-grub;
 # legacy grub is not installed in this image
@@ -111,7 +107,7 @@ def _copy_content_to_image(contentdir, target_image):
         g.upload(os.path.join(contentdir,filename),"/boot/grub/" + filename)
     g.sync()
 
-def generate_install_image(tree_url, image_filename, parameters, updates):
+def generate_install_image(tree_url, image_filename, parameters):
     """
     Generate a .raw file, this is the entry point function from main.
     The steps are:
@@ -122,26 +118,44 @@ def generate_install_image(tree_url, image_filename, parameters, updates):
     _create_ext2_image(image_filename, image_size=(1024*1024*200))
     tmp_content_dir = mkdtemp()
     try:
-        _generate_boot_content(tree_url, tmp_content_dir, parameters, updates)
+        _generate_boot_content(tree_url, tmp_content_dir, parameters)
         _copy_content_to_image(tmp_content_dir, image_filename)
     finally:
         shutil.rmtree(tmp_content_dir)
 
 def get_opts():
-    usage='%prog [options] install-tree image-name'
+    usage='%prog [options] image-name'
+    branch_release = 19
     parser = OptionParser(usage=usage)
+    parser.add_option('-n', '--nightly', default=False, action='store_true',
+        help='Use the latest (F%s) nightly install tree' % branch_release)
     parser.add_option('-p', '--parameters', default='',
         help='Set the kernel parameters to be passed to Anaconda')
+    parser.add_option('-r', '--release',
+        help='Use the install tree from a particular release (15+)')
+    parser.add_option('-t', '--tree',
+        help='Use an arbitrary installation tree URL')
     parser.add_option('-u', '--updates', default=None,
         help='Pass a URL to an updates.img and include that')
     opts, args = parser.parse_args()
     opts.parameters += ' ks=http://169.254.169.254/latest/user-data'
-    if len(args) != 2:
-        parser.error('You must provide an install tree and image name')
+    if opts.updates:
+        opts.parameters += ' updates=%s' % opts.updates
+    if len(args) != 1:
+        parser.error('You must provide an image name')
     if not args[1].endswith('.raw'):
         args[1] += '.raw'
-    return args[0], args[1], opts.parameters, opts.updates
+    install_tree = None
+    if opts.nightly:
+        install_tree = 'http://dl.fedoraproject.org/pub/fedora/linux/development/%s/x86_64/os/' % branch_release
+    elif opts.release:
+        install_tree = 'http://alt.fedoraproject.org/pub/fedora/linux/releases/%s/Fedora/x86_64/os/' % opts.release
+    elif opts.tree:
+        install_tree = opts.tree
+    else:
+        parser.error('You must use --nightly, --release, or --tree')
+    return install_tree, args[0], opts.parameters
 
 if __name__ == "__main__":
-    treeurl, imagename, params, updates = get_opts()
-    generate_install_image(treeurl, imagename, params, updates)
+    treeurl, imagename, params = get_opts()
+    generate_install_image(treeurl, imagename, params)
