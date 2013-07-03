@@ -166,14 +166,14 @@ class AMIHelper(object):
                 except:
                     self.log.warning("Failed to delete temp security group!")
             # TODO: This is sometimes redundant - try to clean up
-            if self.instance:
-                try:
-                    self.instance.update()
-                    if self.instance.state != 'terminated':
-                        self.instance.terminate()
-                except:
-                    self.log.warning(
-                        "Could not update (or terminate?) instance object")
+            #if self.instance:
+            #    try:
+            #        self.instance.update()
+            #        if self.instance.state != 'terminated':
+            #            self.instance.terminate()
+            #    except:
+            #        self.log.warning(
+            #            "Could not update (or terminate?) instance object")
         return ami
 
     def _launch_wait_snapshot(self, ami, user_data, img_size=10, inst_type='m1.small', img_name=None, img_desc=None, remote_access_command=None):
@@ -344,11 +344,11 @@ class EBSHelper(object):
         # Remove remote copy of the key
         if self.key_name:
             try:
-                self.conn.delete_key_pair(key_name)
-            except:
+                self.conn.delete_key_pair(self.key_name)
+            except Exception, e:
                 self.log.warning(
-                    "Local key named %s failed to delete on EC2" %
-                    self.key_name)
+                    "Local key named %s failed to delete on EC2: %s" %
+                    (self.key_name, e))
         # Terminate the instance
         if self.instance:
             try:
@@ -361,15 +361,14 @@ class EBSHelper(object):
                         break
                     elif(i < timeout):
                         self.log.debug(
-                            "Instance is not terminated [%d of %d seconds]" %
-                            (self.instance.state, i * interval,
-                            timeout * interval))
+                            "Instance is not terminated [%s of %s seconds]" %
+                            (i * interval, timeout * interval))
                         sleep(interval)
                     else:
                         self.log.warning(
                             "Timeout waiting for instance to terminate.")
-            except:
-                self.log.warning("Could not terminate instancence!")
+            except Exception, e:
+                self.log.warning("Could not terminate instance: %s" % e)
 
         # If we do have an instance it must be terminated before this can happen
         # That is why we put it last
@@ -377,8 +376,8 @@ class EBSHelper(object):
         if self.security_group:
             try:
                 self.security_group.delete()
-            except:
-                self.log.warning("Temporary security group failed to delete!")
+            except Exception, e:
+                self.log.warning("Temporary security group failed to delete: %s" % e)
 
     def file_to_snapshot(self, filename, compress=True):
         # TODO: Add a conservative exception handler over the top of this to
@@ -452,7 +451,7 @@ class EBSHelper(object):
         command += '-o ConnectTimeout=30 -o UserKnownHostsFile=/dev/null -o PasswordAuthentication=no '
         command += 'root@%s "gzip -d -c | dd of=/dev/xvdh bs=4k"' % self.instance.public_dns_name
 
-        self.log.debug("Command will be:\n\n%s\n\n" % command)
+        self.log.debug("Command will be:\n%s\n" % command)
         self.log.debug("Running.  This may take some time.")
         process_utils.subprocess_check_output([ command ], shell=True)
 
