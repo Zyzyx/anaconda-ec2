@@ -148,7 +148,7 @@ class AMIHelper(object):
             block_device_map=block_map)
         return str(result)
 
-    def launch_wait_snapshot(self, ami, user_data, img_size = 10, img_name = None, img_desc = None, remote_access_cmd = None):
+    def launch_wait_snapshot(self, ami, user_data, img_size=10, inst_type='m1.small', img_name=None, img_desc=None, remote_access_cmd=None):
         if not img_name:
             rand_id = random.randrange(2**32)
             # These names need to be unique, hence the pseudo-uuid
@@ -158,7 +158,7 @@ class AMIHelper(object):
 
         try:
             ami = self._launch_wait_snapshot(
-                ami, user_data, img_size, img_name, img_desc, remote_access_cmd)
+                ami, user_data, img_size, inst_type, img_name, img_desc, remote_access_cmd)
         finally:
             if self.security_group:
                 try:
@@ -176,7 +176,7 @@ class AMIHelper(object):
                         "Could not update (or terminate?) instance object")
         return ami
 
-    def _launch_wait_snapshot(self, ami, user_data, img_size = 10, img_name = None, img_desc = None, remote_access_command = None):
+    def _launch_wait_snapshot(self, ami, user_data, img_size=10, inst_type='m1.small', img_name=None, img_desc=None, remote_access_command=None):
         rand_id = random.randrange(2**32)
         # Modified from code taken from Image Factory
         # Create security group
@@ -195,11 +195,10 @@ class AMIHelper(object):
         block_map['/dev/sda'] = ebs_root
 
         # Now launch it
-        instance_type="m1.small"
-        self.log.debug("Starting ami %s in region %s with instance_type %s" %
-            (ami, self.region.name, instance_type))
+        self.log.debug("Starting %s in %s with as %s" %
+            (ami, self.region.name, inst_type))
         reservation = self.conn.run_instances(ami, max_count=1,
-            instance_type=instance_type, user_data=user_data,
+            instance_type=inst_type, user_data=user_data,
             security_groups=[security_group_name], block_device_map=block_map)
         if len(reservation.instances) == 0:
             raise Exception("Attempt to start instance failed")
@@ -246,7 +245,7 @@ class AMIHelper(object):
 
 class EBSHelper(object):
 
-    def __init__(self, ec2_region, utility_ami = None, command_prefix = None, user = 'root'):
+    def __init__(self, ec2_region, utility_ami=None, command_prefix=None, user='root'):
         super(EBSHelper, self).__init__()
         self.log = logging.getLogger(
             '%s.%s' % (__name__, self.__class__.__name__))
@@ -316,7 +315,7 @@ class EBSHelper(object):
 
         # Now launch it
         instance_type="m1.small"
-        self.log.debug("Starting ami %s in region %s with instance_type %s" %
+        self.log.debug("Starting %s in %s as %s" %
             (self.utility_ami, self.region.name, instance_type))
         reservation = self.conn.run_instances(
             self.utility_ami, max_count=1, instance_type=instance_type,
