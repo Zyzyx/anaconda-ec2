@@ -34,7 +34,7 @@ def subprocess_check_output_pty(*popenargs, **kwargs):
     os.close(master)
     if retcode:
         cmd = ' '.join(*popenargs)
-        raise Exception("'%s' failed(%d): %s" % (cmd, retcode, stderr))
+        raise Exception("'%s' failed(%d), stderr: %s" % (cmd, retcode, stderr))
     return (stdout, stderr, retcode)
 
 def ssh_execute_command(guestaddr, sshprivkey, command, timeout=10, user='root', prefix=None):
@@ -68,23 +68,3 @@ def ssh_execute_command(guestaddr, sshprivkey, command, timeout=10, user='root',
         return subprocess_check_output_pty(cmd)
     else:
         return subprocess_check_output(cmd)
-
-def enable_root(guestaddr, sshprivkey, user, prefix):
-    for cmd in ('mkdir /root/.ssh',
-                'chmod 600 /root/.ssh',
-                'cp /home/%s/.ssh/authorized_keys /root/.ssh' % user,
-                'chmod 600 /root/.ssh/authorized_keys'):
-        try:
-            ssh_execute_command(guestaddr, sshprivkey, cmd, user=user,
-                prefix=prefix)
-        except Exception as e:
-            pass
-    try:
-        stdout, stderr, retcode = ssh_execute_command(
-            guestaddr, sshprivkey, '/bin/id')
-        if not re.search('uid=0', stdout):
-            raise Exception(
-                'Running /bin/id on %s as root: %s' % (guestaddr, stdout))
-    except Exception as e:
-        raise Exception(
-            'Transfer of authorized_keys to root from %s failed - %s' % (user, e))

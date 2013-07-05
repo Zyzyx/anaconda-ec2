@@ -50,6 +50,23 @@ PVGRUB_AKIS =  { 'us-east-1':      { 'i386':'aki-b2aa75db' ,'x86_64':'aki-b4aa75
                  'ap-northeast-1': { 'i386':'aki-3e99283f' ,'x86_64':'aki-40992841' },
                  'sa-east-1':      { 'i386':'aki-ce8f51d3' ,'x86_64':'aki-c88f51d5' } }
 
+def safe_call(call, args, log, die=False):
+    """
+    Safely call an EC2 API and catch an error if something happens.
+    """
+    #log.debug('calling an EC2 API: %s(%s)' % (call.func_name, args))
+    retval = 'ERROR'
+    try:
+        retval = call(*args)
+    except EC2ResponseError, e:
+        log.warning('Caught a %s when calling %s(%s). Error: %s' %
+            (type(e), call.func_name, args, e))
+    except Exception, e:
+        log.warning('Caught a %s in the dirty except' % type(e))
+        log.error('Error message: %s' % e)
+    if retval == 'ERROR' and die:
+        raise RuntimeError('safe_call blew up')
+    return retval
 
 def wait_for_ec2_instance_state(instance, log, final_state='running', timeout=300):
     for i in range(timeout):
@@ -57,43 +74,15 @@ def wait_for_ec2_instance_state(instance, log, final_state='running', timeout=30
             log.debug(
                 "Waiting for EC2 instance to enter state (%s): %d/%d" %
                 (final_state, i, timeout))
-        try:
-            instance.update()
-        except EC2ResponseError, e:
-            # We occasionally get errors when querying an instance that has
-            # just started - ignore them and hope for the best
-            log.warning(
-                "EC2ResponseError encountered about %s - trying to continue" %
-                instance.id, exc_info=True)
-        except:
-            log.error(
-                "Exception encountered when updating status of instance (%s)" %
-                instance.id, exc_info = True)
-            try:
-                instance.terminate()
-            except:
-                log.warning(
-                    "WARNING: Could not terminate %s, it may still be running" %
-                    instance.id, exc_info = True)
-                raise Exception(
-                    "%s failed to fully start or terminate" % instance.id)
-            raise Exception(
-                "Exception encountered waiting for %s enter state (%s)" %
-                (instance.id, final_state))
+            request = safe_call(instance.update, [], log)
+            if type(request) == Exception:
+                safe_call(instance.terminate, [], log)
+                break
         if instance.state == final_state:
             break
         sleep(1)
-
     if instance.state != final_state:
-        try:
-            instance.terminate()
-        except:
-            log.warning(
-                "WARNING: Could not terminate %s, it may still be running" %
-                instance.id, exc_info = True)
-            raise Exception(
-                "%s failed to reach state %s, it may still be running" %
-                (instance.id, final_state))
+        safe_call(instance.terminate, [], log)
         raise Exception("Instance failed to start after %d seconds" % timeout)
 
 class AMIHelper(object):
@@ -155,25 +144,12 @@ class AMIHelper(object):
             img_name = 'EBSHelper AMI - %s - uuid-%x' % (ami, rand_id)
         if not img_desc:
             img_desc = 'Created from modified snapshot of AMI %s' % (ami)
-
         try:
             ami = self._launch_wait_snapshot(
                 ami, user_data, img_size, inst_type, img_name, img_desc, remote_access_cmd)
         finally:
             if self.security_group:
-                try:
-                    self.security_group.delete()
-                except:
-                    self.log.warning("Failed to delete temp security group!")
-            # TODO: This is sometimes redundant - try to clean up
-            #if self.instance:
-            #    try:
-            #        self.instance.update()
-            #        if self.instance.state != 'terminated':
-            #            self.instance.terminate()
-            #    except:
-            #        self.log.warning(
-            #            "Could not update (or terminate?) instance object")
+                safe_call(self.security_group.delete, [], self.log)
         return ami
 
     def _launch_wait_snapshot(self, ami, user_data, img_size=10, inst_type='m1.small', img_name=None, img_desc=None, remote_access_command=None):
@@ -280,18 +256,10 @@ class EBSHelper(object):
         try:
             snapshot = self.file_to_snapshot(image_file)
         finally:
-            self.terminate_ami()
+            safe_call(self.terminate_ami, (), self.log)
         return snapshot
 
     def start_ami(self):
-        try:
-            self._start_ami()
-        except Exception as e:
-            self.log.error("Exception while starting AMI - cleaning up")
-            self.log.exception(e)
-            self.terminate_ami()
-
-    def _start_ami(self):
         rand_id = random.randrange(2**32)
         # Modified from code taken from Image Factory 
         # Create security group
@@ -299,13 +267,14 @@ class EBSHelper(object):
         security_group_desc = "Temporary security group with SSH access generated by EBSHelper python object"
         self.log.debug("Creating temporary security group (%s)" %
             security_group_name)
-        self.security_group = self.conn.create_security_group(
-            security_group_name, security_group_desc)
+        self.security_group = safe_call(self.conn.create_security_group,
+            (security_group_name, security_group_desc), self.log, die=True)
         self.security_group.authorize('tcp', 22, 22, '0.0.0.0/0')
         # Create a use-once SSH key
         self.log.debug("Creating SSH key pair for image upload")
         self.key_name = "ebs-helper-tmp-%x" % (rand_id)
-        self.key = self.conn.create_key_pair(self.key_name)
+        self.key = safe_call(self.conn.create_key_pair, (self.key_name,),
+            self.log, die=True)
         # Shove into a named temp file
         self.key_file_object = NamedTemporaryFile()
         self.key_file_object.write(self.key.material)
@@ -328,60 +297,41 @@ class EBSHelper(object):
         self.wait_for_ec2_ssh_access(self.instance.public_dns_name,
             self.key_file_object.name)
         self.enable_root(self.instance.public_dns_name,
-            self.key_file_object.name, self.user, self.command_prefix) 
+            self.key_file_object.name, self.user, self.command_prefix)
 
     def terminate_ami(self):
         # Terminate the AMI and delete all local and remote artifacts
         # Try very hard to do whatever is possible here and warn loudly if
         # something may have been left behind
         # Remove local copy of the key
-        if self.key_file_object:
-            try:
-                self.key_file_object.close()
-            except:
-                self.log.warning(
-                    "Temporary key file could not be closed!")
+        self.key_file_object.close()
+
         # Remove remote copy of the key
         if self.key_name:
-            try:
-                self.conn.delete_key_pair(self.key_name)
-            except Exception, e:
-                self.log.warning(
-                    "Local key named %s failed to delete on EC2: %s" %
-                    (self.key_name, e))
+            safe_call(self.conn.delete_key_pair, (self.key_name,), self.log)
+
         # Terminate the instance
         if self.instance:
-            try:
-                self.instance.terminate()
-                timeout = 60
-                interval = 5
-                for i in range(timeout):
-                    self.instance.update()
-                    if(self.instance.state == "terminated"):
-                        break
-                    elif(i < timeout):
-                        self.log.debug(
-                            "Instance is not terminated [%s of %s seconds]" %
-                            (i * interval, timeout * interval))
-                        sleep(interval)
-                    else:
-                        self.log.warning(
-                            "Timeout waiting for instance to terminate.")
-            except Exception, e:
-                self.log.warning("Could not terminate instance: %s" % e)
+            retval = safe_call(self.instance.terminate, (), self.log, die=True)
+            timeout = 60
+            interval = 5
+            for i in range(timeout):
+                safe_call(self.instance.update, (), self.log, die=True)
+                if self.instance.state == "terminated" :
+                    break
+                elif i < timeout :
+                    self.log.debug(
+                        "Instance is not terminated [%s of %s seconds]" %
+                        (i * interval, timeout * interval))
+                    sleep(interval)
 
         # If we do have an instance it must be terminated before this can happen
         # That is why we put it last
         # Try even if we get an exception while doing the termination above
         if self.security_group:
-            try:
-                self.security_group.delete()
-            except Exception, e:
-                self.log.warning("Temporary security group failed to delete: %s" % e)
+            safe_call(self.security_group.delete, (), self.log)
 
     def file_to_snapshot(self, filename, compress=True):
-        # TODO: Add a conservative exception handler over the top of this to
-        # delete all remote artifacts on an exception
         if not self.instance:
             raise Exception("You must start the utility instance first!")
         if not os.path.isfile(filename):
@@ -399,41 +349,30 @@ class EBSHelper(object):
         self.log.debug(
             "Waiting up to 600 seconds for volume (%s) to become available" %
             volume.id)
-        retcode = 1
         for i in range(60):
-            volume.update()
+            safe_call(volume.update, (), self.log, die=True)
             if volume.status == "available":
-                retcode = 0
                 break
             self.log.debug(
                 "Volume status (%s) - waiting for 'available': %d/600" %
                 (volume.status, i*10))
             sleep(10)
-        if retcode:
-            raise Exception(
-                "Unable to create target volume for EBS AMI - aborting")
 
         # Volume is now available, attach it
-        self.conn.attach_volume(volume.id, self.instance.id, "/dev/sdh")
+        safe_call(self.conn.attach_volume,
+            (volume.id, self.instance.id, "/dev/sdh"), self.log, die=True)
         self.log.debug(
             "Waiting up to 120 seconds for volume (%s) to become in-use" %
             volume.id)
-        retcode = 1
         for i in range(12):
-            volume.update()
+            safe_call(volume.update, (), self.log, die=True)
             vs = volume.attachment_state()
             if vs == "attached":
-                retcode = 0
                 break
             self.log.debug(
                 "Volume status (%s) - waiting for 'attached': %d/120" %
                 (vs, i*10))
             sleep(10)
-
-        if retcode:
-            raise Exception(
-                "Unable to attach volume (%s) to instance (%s) aborting" %
-                (volume.id, self.instance.id))
 
         # TODO: This may not be necessary but it helped with some funnies
         # observed during testing. At some point run a bunch of builds without
@@ -468,41 +407,30 @@ class EBSHelper(object):
         self.log.debug(
             "Waiting up to 1200 seconds for snapshot (%s) to become completed" %
             snapshot.id)
-        retcode = 1
         for i in range(120):
-            snapshot.update()
+            safe_call(snapshot.update, (), self.log, die=True)
             if snapshot.status == "completed":
-                retcode = 0
                 break
             self.log.debug(
                 "Snapshot progress(%s) - status (%s) is not 'completed': %d/1200" %
                 (str(snapshot.progress), snapshot.status, i*10))
             sleep(10)
-        if retcode:
-            raise Exception("Unable to snapshot volume (%s) - aborting" %
-                volume.id)
         self.log.debug("Successful creation of snapshot (%s)" % snapshot.id)
         self.log.debug("Detaching volume (%s)" % volume.id)
-        volume.detach()
+        safe_call(volume.detach, (), self.log)
 
         self.log.debug(
             "Waiting up to 120 seconds for %s to become detached (available)" %
             volume.id)
-        retcode = 1
         for i in range(12):
-            volume.update()
+            safe_call(volume.update, (), self.log, die=True)
             if volume.status == "available":
-                retcode = 0
                 break
             self.log.debug("Volume status (%s) - is not 'available': %d/120" %
                 (volume.status, i*10))
             sleep(10)
-        if retcode:
-            raise Exception(
-                "Unable to detach volume! It may persist and cost money!")
         self.log.debug("Deleting volume")
-        volume.delete()
-        # TODO: Verify delete
+        safe_call(volume.delete, (), self.log, die=True)
         return snapshot.id
 
     def wait_for_ec2_ssh_access(self, guestaddr, sshprivkey):
@@ -514,6 +442,8 @@ class EBSHelper(object):
             try:
                 process_utils.ssh_execute_command(guestaddr, sshprivkey,
                     "/bin/true", user=self.user)
+                self.log.debug('reached the instance as %s using %s' %
+                    (self.user, sshprivkey))
                 break
             except:
                 pass
@@ -527,64 +457,29 @@ class EBSHelper(object):
         for i in range(300):
             if i % 10 == 0:
                 self.log.debug("Waiting for EC2 instance to start: %d/300" % i)
-            try:
-                instance.update()
-            except EC2ResponseError, e:
-                # We occasionally get errors when querying an instance that has
-                # just started - ignore them and hope for the best
-                self.log.warning(
-                    "EC2ResponseError caught about %s - trying to continue" %
-                    instance.id, exc_info = True)
-            except:
-                self.log.error(
-                    "Exception encountered when updating status of %s" %
-                    instance.id, exc_info = True)
-                self.status="FAILED"
-                try:
-                    self.instance.terminate()
-                except:
-                    self.log.warning(
-                        "WARNING: %s failed to start and will not terminate!" %
-                        instance.id, exc_info = True)
-                    raise Exception(
-                        "%s failed to fully start or terminate!" % instance.id)
-                raise Exception(
-                    "Exception encountered when waiting for %s to start" %
-                    instance.id)
+                retval = safe_call(instance.update, [], self.log)
+                if type(retval) == Exception:
+                    safe_call(self.instance.terminate, [], self.log)
+                    break
             if instance.state == u'running':
                 break
             sleep(1)
 
         if instance.state != u'running':
             self.status="FAILED"
-            try:
-                self.instance.terminate()
-            except:
-                self.log.warning(
-                    "WARNING: %s failed to start and will not terminate!" %
-                    instance.id, exc_info = True)
-                raise Exception("%s failed to fully start or terminate!" %
-                    instance.id)
-            raise Exception(
+            safe_call(self.instance.terminate, [], self.log)
+            raise RuntimeException(
                 "Instance failed to start after 300 seconds - stopping")
 
     def enable_root(self,guestaddr, sshprivkey, user, prefix):
-        for cmd in ('mkdir /root/.ssh',
+        for cmd in ('mkdir -p /root/.ssh',
                     'chmod 600 /root/.ssh',
                     'cp -f /home/%s/.ssh/authorized_keys /root/.ssh' % user,
                     'chmod 600 /root/.ssh/authorized_keys'):
-            try:
-                process_utils.ssh_execute_command(guestaddr, sshprivkey, cmd,
-                    user=user, prefix=prefix)
-            except Exception as e:
-                pass
-        try:
-            stdout, stderr, retcode = process_utils.ssh_execute_command(
-                guestaddr, sshprivkey, '/bin/id')
-            if not re.search('uid=0', stdout):
-                raise Exception('Running /bin/id on %s as root: %s' %
-                    (guestaddr, stdout))
-        except Exception as e:
-            raise Exception(
-                'Transfer of authorized_keys to root from %s failed: %s' %
-                (user, e))
+            process_utils.ssh_execute_command(
+                guestaddr, sshprivkey, cmd, user=user, prefix=prefix)
+        stdout, stderr, retcode = process_utils.ssh_execute_command(
+            guestaddr, sshprivkey, '/bin/id')
+        if not re.search('uid=0', stdout):
+            raise Exception('Running /bin/id on %s as root: %s' %
+                (guestaddr, stdout))
