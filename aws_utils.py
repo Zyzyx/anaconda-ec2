@@ -90,6 +90,8 @@ def wait_for_ec2_instance_state(instance, log, final_state='running', timeout=30
 class EC2Helper(object):
 
     def __init__(self, ec2_region):
+        self.log = logging.getLogger('%s.%s' %
+            (__name__, self.__class__.__name__))
         try:
             self.region = boto.ec2.get_region(ec2_region)
             self.conn = self.region.connect()
@@ -110,29 +112,55 @@ class EC2Helper(object):
         self.security_group.add_tag('Name', resource_tag)
 
     def get_our_instances(self):
-        return self.conn.get_all_instances(filter={'tag-name': resource_tag})
+        reservations = self.conn.get_all_instances(
+            filters={'tag-value': resource_tag})
+        return [inst for reserve in reservations for inst in reserve.instances]
 
     def get_our_amis(self):
-        return self.conn.get_all_images(filter={'tag-name': resource_tag})
+        return self.conn.get_all_images(filters={'tag-value': resource_tag})
 
     def get_our_keys(self):
         return self.conn.get_all_key_pairs()
 
     def get_our_sgroups(self):
-        return self.conn.get_all_security_groups(
-            filter={'tag-name': resource_tag})
+        return self.conn.get_all_security_groups(filters={'tag-value': resource_tag})
 
     def get_our_volumes(self):
-        return self.conn.get_all_volumes(filter={'tag-name': resource_tag})
+        return self.conn.get_all_volumes(filters={'tag-value': resource_tag})
 
     def get_our_snapshots(self):
-        return self.conn.get_all_snapshots(filter={'tag-name': resource_tag})
+        return self.conn.get_all_snapshots(filters={'tag-value': resource_tag})
+
+    def destroy_sgroups(self):
+        [safe_call(g.delete, (), self.log) for g in self.get_our_sgroups()]
+
+    def destroy_instances(self):
+        [safe_call(i.terminate, (), self.log) for i in self.get_our_instances()]
+
+    def destroy_amis(self):
+        [safe_call(a.deregister, (), self.log) for a in self.get_our_amis()]
+
+    def destroy_volumes(self):
+        [safe_call(v.delete, (), self.log) for v in self.get_our_volumes()]
+
+    def destroy_snapshots(self):
+        [safe_call(s.delete, (), self.log) for s in self.get_our_snapshots()]
+
+    def destroy_keys(self):
+        # TODO: cannot tag these, so need to figure out how to do this
+        pass
+
+    def destroy_all(self):
+        self.destroy_sgroups()
+        self.destroy_instances()
+        self.destroy_amis()
+        self.destroy_keys()
+        self.destroy_volumes()
+        self.destroy_snapshots()
 
 class AMIHelper(EC2Helper):
 
     def __init__(self, ec2_region):
-        self.log = logging.getLogger('%s.%s' %
-            (__name__, self.__class__.__name__))
         super(AMIHelper, self).__init__(ec2_region)
 
     def register_ebs_ami(self, snapshot_id, arch='x86_64', default_ephem_map=True, img_name=None, img_desc=None):
@@ -257,8 +285,6 @@ class AMIHelper(EC2Helper):
 class EBSHelper(EC2Helper):
 
     def __init__(self, ec2_region, utility_ami=None, command_prefix=None, user='root'):
-        self.log = logging.getLogger(
-            '%s.%s' % (__name__, self.__class__.__name__))
         super(EBSHelper, self).__init__(ec2_region)
         if not utility_ami:
             self.utility_ami = UTILITY_AMIS[ec2_region][0]
