@@ -1,5 +1,0 @@
-Only F18 works out of the box with these.
-
-RHEL6/CentOS 6 works but cloud-init is, for the moment, broken.
-We need to push an update to EPEL.
-
